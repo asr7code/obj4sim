@@ -30,10 +30,10 @@ BRAKING_SPEED = 1
 VISIBILITY_DISTANCE = 50 * (1 - fog_level / 100.0)
 # Minimum distance needed to stop
 BRAKING_DISTANCE = 15 
-# Probability of an accident per tick for the lead car
-ACCIDENT_PROBABILITY = 0.02
+# Probability of a random car crashing per tick
+ACCIDENT_PROBABILITY = 0.01
 # How long an accident stays on the road (in seconds)
-ACCIDENT_DURATION_S = 30 
+ACCIDENT_DURATION_S = 20 
 
 # -----------------------
 # HELPER FUNCTIONS
@@ -45,22 +45,22 @@ def get_time():
 
 def add_log_entry(log, message, voice_queue=None, speak=False):
     """Adds a new entry to the top of a log list and queues voice."""
-    log.insert(0, f"[{get_time()}] {message}")
-    if speak and voice_queue is not None:
-        voice_queue.append(message)
+    entry = f"[{get_time()}] {message}"
+    if entry not in log: # Avoid duplicate log entries
+        log.insert(0, entry)
+        if speak and voice_queue is not None:
+            voice_queue.append(message)
 
 def initialize_cars(road_id, num_cars):
     """Creates a list of car dictionaries for a road."""
     cars = []
     for i in range(num_cars):
         cars.append({
-            'id': f"{road_id}-{i}",
-            # Space cars out evenly on the looping road
+            'id': f"{road_id}-{i+1}", # Start from 1 for clarity
             'x': (i * (ROAD_LENGTH / num_cars)) % ROAD_LENGTH,  
             'speed': NORMAL_SPEED,
             'status': 'Normal', # Normal, Braking (Alert), Braking (Visual), Stopped, Crashed
             'alert_message': 'All clear.',
-            'log_alerted': False # Flag to prevent log spam
         })
     return cars
 
@@ -74,25 +74,7 @@ def update_road_logic(cars, accident_info, log, voice_queue):
     for i in range(len(cars)):
         car = cars[i]
         
-        # --- Reset log_alerted flag if car is normal ---
-        if car['status'] == 'Normal':
-            car['log_alerted'] = False
-            car['alert_message'] = 'All clear.'
-
-        # --- Skip cars that are stopped or crashed ---
-        if car['status'] in ['Stopped', 'Crashed']:
-            car['speed'] = 0
-            continue
-
-        # --- 1. ATOA ALERT LOGIC (Your Project's Feature) ---
-        if accident_info and car['x'] < accident_info['x'] and not car['log_alerted']:
-            car['alert_message'] = f"🚨 ATOA Alert!"
-            car['status'] = 'Braking (Alert)'
-            add_log_entry(log, f"Car {car['id']}: Received broadcast! Accident at {int(accident_info['x'])}. Braking.", voice_queue, speak=True)
-            car['log_alerted'] = True # Mark as alerted
-
-        # --- 2. DRIVER VISUAL LOGIC (Normal Human Driving) ---
-        # Find the car in front (handles loop-around)
+        # --- Find the car in front (handles loop-around) ---
         car_in_front = cars[i-1] if i > 0 else cars[-1]
         
         # Calculate distance, handling the road loop
@@ -101,73 +83,122 @@ def update_road_logic(cars, accident_info, log, voice_queue):
         else:
             distance = (ROAD_LENGTH - car['x']) + car_in_front['x']
 
+        # --- Reset status if obstacle is gone ---
+        if car['status'] == 'Stopped' and (car_in_front['status'] != 'Stopped' and car_in_front['status'] != 'Crashed'):
+            car['status'] = 'Normal'
+        if car['status'].startswith('Braking') and (not accident_info or car['x'] > accident_info['x']):
+            car['status'] = 'Normal' # Clear alert if we passed the accident
+
+        # --- Skip cars that are crashed ---
+        if car['status'] == 'Crashed':
+            car['speed'] = 0
+            continue
+            
+        old_status = car['status'] # Store status to check for changes
+
+        # --- 1. ATOA ALERT LOGIC (Your Project's Feature) ---
+        if accident_info and car['x'] < accident_info['x'] and car['status'] == 'Normal':
+            car['status'] = 'Braking (Alert)'
+            car['alert_message'] = f"🚨 ATOA Alert: Accident Ahead!"
+            add_log_entry(log, f"Car {car['id']}: Received broadcast! Accident at {int(accident_info['x'])}. Braking.", voice_queue, speak=True)
+        
+        # --- 2. DRIVER VISUAL LOGIC (Normal Human Driving) ---
+        
         # A. Check for visual on the car in front
         if distance <= VISIBILITY_DISTANCE:
             # If the car in front is crashed...
             if car_in_front['status'] == 'Crashed':
                 # ...is it too late to stop?
                 if distance <= BRAKING_DISTANCE:
-                    car['status'] = 'Crashed' # 💥 Chain reaction!
+                    car['status'] = 'Crashed' 
                     car['alert_message'] = "CRASHED!"
-                    if not car['log_alerted']:
-                        add_log_entry(log, f"Car {car['id']}: CRASHED! (Too late to see).", voice_queue, speak=True)
-                        car['log_alerted'] = True
                 else:
                     # ...no, driver can see it and brake.
-                    if not car['status'].startswith('Braking'):
+                    if car['status'] == 'Normal':
                         car['status'] = 'Braking (Visual)'
-                        car['alert_message'] = "Driver: Crash!"
-                        if not car['log_alerted']:
-                            add_log_entry(log, f"Car {car['id']}: Driver spotted crash. Braking.")
-                            car['log_alerted'] = True
+                        car['alert_message'] = "Driver: Crash Spotted!"
             
-            # If car in front is just braking, driver should also brake.
+            # If car in front is just braking or stopped, driver should also brake/stop.
             elif car_in_front['status'].startswith('Braking') and car['status'] == 'Normal':
                 car['status'] = 'Braking (Visual)'
-                car['alert_message'] = "Driver: Brakes!"
-        
+                car['alert_message'] = "Driver: Brakes Spotted!"
+            elif car_in_front['status'] == 'Stopped' and car['status'] == 'Normal':
+                car['status'] = 'Braking (Visual)'
+                car['alert_message'] = "Driver: Stopped Car!"
+
         # B. If car is braking (from alert or visual), manage its speed
         if car['status'].startswith('Braking'):
             car['speed'] = BRAKING_SPEED
             # Logic to stop safely before the obstacle
-            obstacle_x = accident_info['x'] if accident_info else car_in_front['x']
-            
-            if car['x'] >= (obstacle_x - BRAKING_DISTANCE - 5) % ROAD_LENGTH: 
-                if car['status'] != 'Stopped':
-                    car['status'] = 'Stopped'
-                    car['alert_message'] = "Stopped."
-                    add_log_entry(log, f"Car {car['id']}: Stopped safely.")
+            if distance <= (BRAKING_DISTANCE + 5): # Stop 5 units behind
+                car['status'] = 'Stopped'
+                car['alert_message'] = "Stopped Safely."
         
         # C. If no alerts and no visual, drive normally
         elif car['status'] == 'Normal':
             car['speed'] = NORMAL_SPEED
+            car['alert_message'] = 'All clear.'
             # Simple follow logic to avoid bumping
             if distance < (BRAKING_DISTANCE + 10): # Keep a 10-unit buffer
                 car['speed'] = BRAKING_SPEED
-
-
-        # --- 3. Move the car and loop it ---
-        car['x'] += car['speed']
-        car['x'] = car['x'] % ROAD_LENGTH # Wrap around the road
-
-def render_road(cars):
-    """Creates a text-based string for the road."""
-    display_length = 100 # Keep display 100 chars
-    road = ["-"] * display_length
-    for car in reversed(cars): # Draw back-to-front
-        pos = int(car['x'] / ROAD_LENGTH * display_length)
-        pos = min(pos, display_length - 1)
         
-        if 0 <= pos < display_length:
-            if car['status'] == 'Crashed':
-                road[pos] = "💥"
+        # --- 3. Log state changes for voice ---
+        if car['status'] != old_status and not car['status'] == 'Crashed':
+            log_msg = f"Car {car['id']}: {car['alert_message']}"
+            if car['status'] == 'Braking (Visual)':
+                add_log_entry(log, log_msg, voice_queue, speak=True)
             elif car['status'] == 'Stopped':
-                road[pos] = "🛑" 
-            elif car['status'].startswith('Braking'):
-                road[pos] = "B" 
+                add_log_entry(log, log_msg)
+        elif car['status'] == 'Crashed' and old_status != 'Crashed':
+             add_log_entry(log, f"Car {car['id']}: CRASHED! (Chain reaction).", voice_queue, speak=True)
+
+
+        # --- 4. Move the car and loop it ---
+        if car['status'] != 'Stopped':
+            car['x'] += car['speed']
+            car['x'] = car['x'] % ROAD_LENGTH # Wrap around the road
+
+def render_drivers_view(driver_car, all_cars):
+    """
+    *** THIS IS THE KEY PROOF-OF-CONCEPT FUNCTION ***
+    Renders the road from the driver's perspective, including fog.
+    """
+    view_length = 50 # How far the driver's "dashboard" view shows
+    road = ["-"] * view_length
+    
+    # Place the driver's car
+    road[0] = "🚘"
+    
+    for car in all_cars:
+        if car['id'] == driver_car['id']:
+            continue
+            
+        # Calculate distance to this car
+        if car['x'] > driver_car['x']:
+            distance = car['x'] - driver_car['x']
+        else:
+            distance = (ROAD_LENGTH - driver_car['x']) + car['x']
+            
+        if 0 < distance < view_length:
+            symbol = "?" # Default
+            
+            # Is the car visible through the fog?
+            if distance <= VISIBILITY_DISTANCE:
+                if car['status'] == 'Crashed':
+                    symbol = "💥"
+                elif car['status'] == 'Stopped':
+                    symbol = "🛑"
+                elif car['status'].startswith('Braking'):
+                    symbol = "B" 
+                else:
+                    symbol = "🚘"
             else:
-                road[pos] = "🚘" 
+                symbol = "▒" # Fog
+                
+            road[int(distance)] = symbol
+            
     return "".join(road)
+
 
 def speak_alerts(voice_queue):
     """Generates JS to speak all queued alerts."""
@@ -198,10 +229,10 @@ if run_button:
     st.session_state.simulation_running = True
     st.session_state.road_1_alert_log = [f"[{get_time()}] Road 1 monitoring... All clear."]
     st.session_state.road_2_alert_log = [f"[{get_time()}] Road 2 monitoring... All clear."]
-    st.session_state.voice_queue = []
 
 if stop_button:
     st.session_state.simulation_running = False
+    st.rerun() # Force a stop and clear the loop
 
 # -----------------------
 # MAIN SIMULATION RENDER
@@ -209,21 +240,18 @@ if stop_button:
 if st.session_state.simulation_running:
     
     # --- Placeholders for all UI elements ---
+    st.markdown(f"**Fog Visibility:** `{VISIBILITY_DISTANCE:.1f} units` | **Safe Braking Distance:** `{BRAKING_DISTANCE} units`")
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Road 1 (Control - No Alerts)")
-        road1_box = st.code("", language="text")
+        dash1_placeholder = st.empty()
         log1_box = st.expander("Road 1: Voice Assistant Log")
-        info1_cols = st.columns(num_cars)
     
     with col2:
         st.subheader("Road 2 (ATOA Protected)")
-        road2_box = st.code("", language="text")
+        dash2_placeholder = st.empty()
         log2_box = st.expander("Road 2: Voice Assistant Log", expanded=True)
-        info2_cols = st.columns(num_cars)
         
-    st.markdown("---")
-    st.markdown(f"**Fog Visibility:** {VISIBILITY_DISTANCE:.1f} units | **Safe Braking Distance:** {BRAKING_DISTANCE} units")
     voice_placeholder = st.empty()
     
     # --- 1. Clear voice queue ---
@@ -231,15 +259,17 @@ if st.session_state.simulation_running:
 
     # --- 2. Check for new RANDOM accident on Road 2 ---
     if not st.session_state.road_2_accident: 
-        lead_car_2 = sorted(st.session_state.road_2_cars, key=lambda c: c['x'], reverse=True)[0]
         if random.random() < ACCIDENT_PROBABILITY:
-            lead_car_2['status'] = 'Crashed'
-            st.session_state.road_2_accident = {'x': lead_car_2['x'], 'time': time.time()}
-            
-            st.warning(f"💥 Accident Occurred on Road 2 at position {int(lead_car_2['x'])}!")
-            add_log_entry(st.session_state.road_2_alert_log, 
-                          f"CRITICAL: Accident detected at {int(lead_car_2['x'])}. Broadcasting ATOA alert!",
-                          st.session_state.voice_queue, speak=True)
+            # Pick a random car to crash
+            car_to_crash = random.choice(st.session_state.road_2_cars)
+            if car_to_crash['status'] == 'Normal': # Only crash normal cars
+                car_to_crash['status'] = 'Crashed'
+                st.session_state.road_2_accident = {'id': car_to_crash['id'], 'x': car_to_crash['x'], 'time': time.time()}
+                
+                st.warning(f"💥 Accident Occurred on Road 2 at position {int(car_to_crash['x'])}!")
+                add_log_entry(st.session_state.road_2_alert_log, 
+                              f"CRITICAL: Accident detected! Broadcasting ATOA alert!",
+                              st.session_state.voice_queue, speak=True)
     
     # --- 3. Check if accident should be CLEARED ---
     if st.session_state.road_2_accident:
@@ -247,7 +277,7 @@ if st.session_state.simulation_running:
             add_log_entry(st.session_state.road_2_alert_log, "INFO: Accident has been cleared. Resuming normal traffic.", st.session_state.voice_queue, speak=True)
             # Find the crashed car and reset it
             for car in st.session_state.road_2_cars:
-                if car['status'] == 'Crashed':
+                if car['id'] == st.session_state.road_2_accident['id']:
                     car['status'] = 'Normal'
             st.session_state.road_2_accident = None
 
@@ -256,34 +286,39 @@ if st.session_state.simulation_running:
     update_road_logic(st.session_state.road_2_cars, st.session_state.road_2_accident, st.session_state.road_2_alert_log, st.session_state.voice_queue)
 
     # --- 5. Render the simulation ---
-    road1_box.code(render_road(st.session_state.road_1_cars))
+    
+    # --- Render Road 1 Dashboard ---
+    driver1 = st.session_state.road_1_cars[0] # Focus on Car A-1
+    road1_view = render_drivers_view(driver1, st.session_state.road_1_cars)
+    dash1_placeholder.code(f"Driver's View: {road1_view}", language="text")
     log1_box.write(st.session_state.road_1_alert_log)
     
-    road2_box.code(render_road(st.session_state.road_2_cars))
+    # --- Render Road 2 Dashboard (The Proof!) ---
+    driver2 = st.session_state.road_2_cars[0] # Focus on Car B-1
+    road2_view = render_drivers_view(driver2, st.session_state.road_2_cars)
+    dash2_placeholder.code(f"Driver's View: {road2_view}", language="text")
     log2_box.write(st.session_state.road_2_alert_log)
 
-    for i in range(num_cars):
-        car1 = st.session_state.road_1_cars[i]
-        with info1_cols[i]:
-            st.metric(f"Car {car1['id']} (Pos: {int(car1['x'])})", car1['status'])
+    # --- Display Status Metrics for all cars ---
+    with col1:
+        for car in st.session_state.road_1_cars:
+            st.metric(f"Car {car['id']} (Pos: {int(car['x'])})", car['status'])
+    with col2:
+        for car in st.session_state.road_2_cars:
+            if car['status'] == 'Crashed':
+                st.metric(f"Car {car['id']} (Pos: {int(car['x'])})", car['status'], "CRASHED")
+            elif car['status'] == 'Braking (Alert)':
+                st.metric(f"Car {car['id']} (Pos: {int(car['x'])})", car['status'], "ATOA ALERT")
+            else:
+                st.metric(f"Car {car['id']} (Pos: {int(car['x'])})", car['status'])
 
-        car2 = st.session_state.road_2_cars[i]
-        with info2_cols[i]:
-            st.metric(f"Car {car2['id']} (Pos: {int(car2['x'])})", car2['status'])
-            if car2['status'] == 'Crashed':
-                st.error(car2['alert_message'])
-            elif car2['status'] == 'Braking (Alert)':
-                st.warning(car2['alert_message'])
-            elif car2['status'] != 'Normal':
-                st.info(car2['alert_message'])
-    
     # --- 6. Process Voice Alerts ---
     voice_html = speak_alerts(st.session_state.voice_queue)
-    voice_placeholder.empty()
+    voice_placeholder.empty() # Clear old JS
     voice_placeholder.write(components.html(voice_html, height=0))
 
     # --- 7. Rerun loop ---
-    time.sleep(0.3)
+    time.sleep(0.4) # Slightly slower for better visibility
     st.rerun()
 
 else:
