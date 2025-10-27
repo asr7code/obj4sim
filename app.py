@@ -26,9 +26,13 @@ stop_button = st.sidebar.button("■ Stop Simulation")
 ROAD_LENGTH = 200
 NORMAL_SPEED = 2
 BRAKING_SPEED = 1
+# Fog reduces visibility. 80 fog = 10 visibility.
 VISIBILITY_DISTANCE = 50 * (1 - fog_level / 100.0)
+# Minimum distance needed to stop
 BRAKING_DISTANCE = 15 
+# Probability of a random car crashing per tick
 ACCIDENT_PROBABILITY = 0.01
+# How long an accident stays on the road (in seconds)
 ACCIDENT_DURATION_S = 20 
 
 # -----------------------
@@ -184,7 +188,8 @@ def render_drivers_view(driver_car, all_cars):
 
     # Fill the road string from the dictionary
     for pos, symbol in occupied_positions.items():
-        road[pos] = symbol
+        if 0 <= pos < len(road): # Check bounds
+            road[pos] = symbol
             
     return "".join(road)
 
