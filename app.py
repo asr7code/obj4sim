@@ -9,7 +9,7 @@ import math
 # -----------------------
 st.set_page_config(page_title="ATOA Simulation", layout="wide")
 st.title("🚨 AI-Based Advanced Traffic Optimizer & Assistant (ATOA)")
-st.subheader("Scripted Demo: Chain-Reaction Prevention (Single Road View)")
+st.subheader("Scripted Demo: Blackspot Accident Prevention")
 
 # -----------------------
 # SIDEBAR CONTROLS
@@ -23,17 +23,17 @@ reset_button = st.sidebar.button("■ Reset Simulation")
 # SIMULATION CONSTANTS
 # -----------------------
 ROAD_LENGTH = 100
-NORMAL_SPEED = 1  # <--- SET TO 1 FOR SLOW SPEED
-BRAKING_SPEED = 0.5 # <--- EVEN SLOWER
+NORMAL_SPEED = 1      # Cars move slowly
+BRAKING_SPEED = 0.5   # Cars brake even slower
 VISIBILITY_DISTANCE = 50 * (1 - fog_level / 100.0)
 BRAKING_DISTANCE = 15 
 
 # --- SCRIPTED EVENTS ---
-CAR_B_START_TIME = 20  # Car B starts when sim time = 20
-CAR_C_START_TIME = 35  # Car C starts when sim time = 35
-CAR_D_START_TIME = 50  # Car D starts when sim time = 50
-CRASH_POINT = 70       # Car B will crash at x=70
-CRASH_TIME = 70        # Car B will crash when sim time = 70
+CAR_2_START_TIME = 20  # Car 2 starts when sim time = 20
+CAR_3_START_TIME = 35  # Car 3 starts when sim time = 35
+CAR_4_START_TIME = 50  # Car 4 starts when sim time = 50
+BLACKSPOT_B = 70       # Position of the blackspot
+CRASH_TIME = 70        # Car 2 will crash when sim time = 70
 
 # -----------------------
 # HELPER FUNCTIONS
@@ -54,10 +54,10 @@ def add_log_entry(log, message, voice_queue=None, speak=False):
 def initialize_cars():
     """Creates a list of car dictionaries."""
     cars = {
-        'A': {'id': 'A', 'x': -10, 'speed': 0, 'status': 'Waiting', 'alert_message': ''},
-        'B': {'id': 'B', 'x': -10, 'speed': 0, 'status': 'Waiting', 'alert_message': ''},
-        'C': {'id': 'C', 'x': -10, 'speed': 0, 'status': 'Waiting', 'alert_message': ''},
-        'D': {'id': 'D', 'x': -10, 'speed': 0, 'status': 'Waiting', 'alert_message': ''}
+        '1': {'id': '1', 'x': -10, 'speed': 0, 'status': 'Waiting', 'alert_message': ''},
+        '2': {'id': '2', 'x': -10, 'speed': 0, 'status': 'Waiting', 'alert_message': ''},
+        '3': {'id': '3', 'x': -10, 'speed': 0, 'status': 'Waiting', 'alert_message': ''},
+        '4': {'id': '4', 'x': -10, 'speed': 0, 'status': 'Waiting', 'alert_message': ''}
     }
     return cars
 
@@ -66,32 +66,32 @@ def update_simulation_logic(cars, sim_time, accident_info, log, voice_queue):
     
     # --- 1. SCRIPTED CAR STARTS ---
     if sim_time == 1:
-        cars['A']['status'] = 'Normal'
-        cars['A']['speed'] = NORMAL_SPEED
-        add_log_entry(log, "Car A is on the road.", voice_queue, speak=True)
-    if sim_time == CAR_B_START_TIME:
-        cars['B']['status'] = 'Normal'
-        cars['B']['speed'] = NORMAL_SPEED
-        add_log_entry(log, "Car B is on the road.", voice_queue, speak=True)
-    if sim_time == CAR_C_START_TIME:
-        cars['C']['status'] = 'Normal'
-        cars['C']['speed'] = NORMAL_SPEED
-        add_log_entry(log, "Car C is on the road.")
-    if sim_time == CAR_D_START_TIME:
-        cars['D']['status'] = 'Normal'
-        cars['D']['speed'] = NORMAL_SPEED
-        add_log_entry(log, "Car D is on the road.")
+        cars['1']['status'] = 'Normal'
+        cars['1']['speed'] = NORMAL_SPEED
+        add_log_entry(log, "Car 1 is on the road.", voice_queue, speak=True)
+    if sim_time == CAR_2_START_TIME:
+        cars['2']['status'] = 'Normal'
+        cars['2']['speed'] = NORMAL_SPEED
+        add_log_entry(log, "Car 2 is on the road.", voice_queue, speak=True)
+    if sim_time == CAR_3_START_TIME:
+        cars['3']['status'] = 'Normal'
+        cars['3']['speed'] = NORMAL_SPEED
+        add_log_entry(log, "Car 3 is on the road.")
+    if sim_time == CAR_4_START_TIME:
+        cars['4']['status'] = 'Normal'
+        cars['4']['speed'] = NORMAL_SPEED
+        add_log_entry(log, "Car 4 is on the road.")
 
     # --- 2. SCRIPTED CRASH ---
-    if sim_time == CRASH_TIME:
-        cars['B']['status'] = 'Crashed'
-        cars['B']['speed'] = 0
-        cars['B']['x'] = CRASH_POINT # Pin to exact spot
-        accident_info = {'id': 'B', 'x': CRASH_POINT}
-        add_log_entry(log, "CRITICAL: Car B has crashed! Broadcasting ATOA alert!", voice_queue, speak=True)
+    if not accident_info and sim_time >= CRASH_TIME and cars['2']['x'] >= BLACKSPOT_B:
+        cars['2']['status'] = 'Crashed'
+        cars['2']['speed'] = 0
+        cars['2']['x'] = BLACKSPOT_B # Pin to exact spot
+        accident_info = {'id': '2', 'x': BLACKSPOT_B}
+        add_log_entry(log, "CRITICAL: Car 2 has crashed at Blackspot B! Broadcasting ATOA alert!", voice_queue, speak=True)
     
     # --- 3. UPDATE EACH CAR'S LOGIC ---
-    for car_id in ['A', 'B', 'C', 'D']:
+    for car_id in ['1', '2', '3', '4']:
         car = cars[car_id]
         if car['status'] == 'Waiting' or car['status'] == 'Finished' or car['status'] == 'Crashed':
             continue # Don't move
@@ -99,19 +99,19 @@ def update_simulation_logic(cars, sim_time, accident_info, log, voice_queue):
         old_status = car['status']
 
         # --- ATOA LOGIC ---
-        if accident_info and car['status'] == 'Normal' and car['id'] != 'B':
+        if accident_info and car['status'] == 'Normal' and car['id'] not in ['1', '2']:
             car['status'] = 'Braking (Alert)'
             car['alert_message'] = "🚨 ATOA Alert!"
             add_log_entry(log, f"Car {car_id}: Received broadcast! Accident ahead. Braking.", voice_queue, speak=True)
 
         # --- FIND CAR IN FRONT ---
         car_in_front = None
-        if car_id == 'B': car_in_front = cars['A']
-        if car_id == 'C': car_in_front = cars['B']
-        if car_id == 'D': car_in_front = cars['C']
+        if car_id == '2': car_in_front = cars['1']
+        if car_id == '3': car_in_front = cars['2']
+        if car_id == '4': car_in_front = cars['3']
 
         distance = 999
-        if car_in_front and car_in_front['x'] > 0: # Check if car in front is on the road
+        if car_in_front and car_in_front['x'] > car['x']:
             distance = car_in_front['x'] - car['x']
 
         # --- VISUAL & SPEED LOGIC ---
@@ -141,8 +141,8 @@ def update_simulation_logic(cars, sim_time, accident_info, log, voice_queue):
             car['status'] = 'Finished'
             car['x'] = ROAD_LENGTH
             car['speed'] = 0
-            if car_id == 'A':
-                add_log_entry(log, "Car A finished safely.")
+            if car_id == '1':
+                add_log_entry(log, "Car 1 finished safely.")
 
     return accident_info
 
@@ -152,14 +152,19 @@ def render_full_road(cars):
     Renders the full road with all cars, like the obj2 simulation.
     """
     road = ["-"] * (ROAD_LENGTH + 1) # Create the road
+    road[0] = "A" # Start Point
+    road[ROAD_LENGTH] = "G" # End Point
+    
+    # Place a marker for the blackspot
+    road[BLACKSPOT_B] = "B" 
     
     # Place a fog marker to show what drivers can see
-    fog_marker_pos = int(CRASH_POINT - VISIBILITY_DISTANCE)
-    if 0 < fog_marker_pos < ROAD_LENGTH:
+    fog_marker_pos = int(BLACKSPOT_B - VISIBILITY_DISTANCE)
+    if 0 < fog_marker_pos < ROAD_LENGTH and road[fog_marker_pos] == "-":
         road[fog_marker_pos] = "|" # "|" = Fog visibility limit
     
-    # Place cars on the road, drawing C and D first
-    for car_id in ['C', 'D', 'B', 'A']:
+    # Place cars on the road
+    for car_id in ['4', '3', '2', '1']: # Draw in reverse order
         car = cars[car_id]
         pos = int(math.floor(car['x']))
 
@@ -167,9 +172,13 @@ def render_full_road(cars):
             symbol = car_id # Default
             if car['status'] == 'Crashed': symbol = "💥"
             elif car['status'] == 'Stopped': symbol = "🛑"
-            elif car['status'] == 'Braking (Alert)': symbol = car_id.lower() # "c", "d"
+            elif car['status'] == 'Braking (Alert)': symbol = car_id.lower() # "3", "4"
             
-            road[pos] = symbol
+            # Don't overwrite Start, End, or Blackspot
+            if road[pos] in ["-", "|"]:
+                road[pos] = symbol
+            elif car['status'] == 'Crashed': # Crash overrides Blackspot
+                road[pos] = "💥"
             
     return "".join(road)
 
@@ -216,7 +225,7 @@ if reset_button:
 if st.session_state.simulation_running:
     
     # --- Placeholders for UI elements ---
-    st.markdown(f"**Fog Visibility:** `{VISIBILITY_DISTANCE:.1f} units` (Indicated by `|`) | **Simulation Time:** `{st.session_state.sim_time}`")
+    st.markdown(f"**Road `A` (Start) to `G` (End)** | **Blackspot at `B`** | **Fog Visibility:** `{VISIBILITY_DISTANCE:.1f} units` (Indicated by `|`)")
     
     # --- SINGLE ROAD DISPLAY ---
     st.subheader("Full Road View")
@@ -224,15 +233,15 @@ if st.session_state.simulation_running:
     
     # --- CAR STATUS ---
     st.markdown("---")
-    colA, colB, colC, colD = st.columns(4)
-    with colA:
-        carA_status = st.empty()
-    with colB:
-        carB_status = st.empty()
-    with colC:
-        carC_status = st.empty()
-    with colD:
-        carD_status = st.empty()
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        car1_status = st.empty()
+    with col2:
+        car2_status = st.empty()
+    with col3:
+        car3_status = st.empty()
+    with col4:
+        car4_status = st.empty()
         
     # This placeholder is the fix for the DeltaGenerator error
     voice_placeholder = st.empty()
@@ -253,19 +262,19 @@ if st.session_state.simulation_running:
     road_placeholder.code(render_full_road(st.session_state.cars), language="text")
 
     # --- 4. Render Status Metrics ---
-    carA_status.metric("Car A", st.session_state.cars['A']['status'], f"{int(st.session_state.cars['A']['x'])}m")
-    carB_status.metric("Car B", st.session_state.cars['B']['status'], f"{int(st.session_state.cars['B']['x'])}m")
+    car1_status.metric("Car 1", st.session_state.cars['1']['status'], f"{int(st.session_state.cars['1']['x'])}m")
+    car2_status.metric("Car 2", st.session_state.cars['2']['status'], f"{int(st.session_state.cars['2']['x'])}m")
     
     # Highlight the "saved" cars
-    if st.session_state.cars['C']['status'] == 'Braking (Alert)':
-        carC_status.metric("Car C", st.session_state.cars['C']['status'], "ATOA ALERT!")
+    if st.session_state.cars['3']['status'] == 'Braking (Alert)':
+        car3_status.metric("Car 3", st.session_state.cars['3']['status'], "ATOA ALERT!")
     else:
-        carC_status.metric("Car C", st.session_state.cars['C']['status'], f"{int(st.session_state.cars['C']['x'])}m")
+        car3_status.metric("Car 3", st.session_state.cars['3']['status'], f"{int(st.session_state.cars['3']['x'])}m")
     
-    if st.session_state.cars['D']['status'] == 'Braking (Alert)':
-        carD_status.metric("Car D", st.session_state.cars['D']['status'], "ATOA ALERT!")
+    if st.session_state.cars['4']['status'] == 'Braking (Alert)':
+        car4_status.metric("Car 4", st.session_state.cars['4']['status'], "ATOA ALERT!")
     else:
-        carD_status.metric("Car D", st.session_state.cars['D']['status'], f"{int(st.session_state.cars['D']['x'])}m")
+        car4_status.metric("Car 4", st.session_state.cars['4']['status'], f"{int(st.session_state.cars['4']['x'])}m")
 
 
     # --- 5. Process Voice Alerts (Hidden) ---
@@ -280,8 +289,8 @@ if st.session_state.simulation_running:
     if all(c['status'] in ['Finished', 'Stopped', 'Crashed'] for c in st.session_state.cars.values()):
         st.session_state.simulation_running = False
         st.success("Simulation Demo Finished.")
-        if st.session_state.cars['C']['status'] == 'Stopped' and st.session_state.cars['D']['status'] == 'Stopped':
-             st.success("Proof of Concept: Cars C and D received the ATOA alert and stopped safely!")
+        if st.session_state.cars['3']['status'] == 'Stopped' and st.session_state.cars['4']['status'] == 'Stopped':
+             st.success("Proof of Concept: Cars 3 and 4 received the ATOA alert and stopped safely!")
         st.balloons()
     else:
         time.sleep(0.3) # Control the simulation speed
