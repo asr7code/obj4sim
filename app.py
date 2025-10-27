@@ -2,13 +2,14 @@ import streamlit as st
 import streamlit.components.v1 as components
 import time
 from datetime import datetime
+import math
 
 # -----------------------
 # PAGE CONFIGURATION
 # -----------------------
 st.set_page_config(page_title="ATOA Simulation", layout="wide")
 st.title("🚨 AI-Based Advanced Traffic Optimizer & Assistant (ATOA)")
-st.subheader("Scripted Demo: Chain-Reaction Prevention")
+st.subheader("Scripted Demo: Chain-Reaction Prevention (Single Road View)")
 
 # -----------------------
 # SIDEBAR CONTROLS
@@ -104,8 +105,6 @@ def update_simulation_logic(cars, sim_time, accident_info, log, voice_queue):
             add_log_entry(log, f"Car {car_id}: Received broadcast! Accident ahead. Braking.", voice_queue, speak=True)
 
         # --- FIND CAR IN FRONT ---
-        # This is complex in a staggered start, so we simplify:
-        # Cars C and D only care about the ACCIDENT. Car B only cares about A.
         car_in_front = None
         if car_id == 'B': car_in_front = cars['A']
         if car_id == 'C': car_in_front = cars['B']
@@ -148,46 +147,28 @@ def update_simulation_logic(cars, sim_time, accident_info, log, voice_queue):
     return accident_info
 
 
-def render_drivers_view(driver_car, all_cars):
-    """Renders the road from the driver's perspective, including fog."""
-    view_length = 60 
-    road = ["-"] * view_length
+def render_full_road(cars):
+    """
+    Renders the full road with all cars, like the obj2 simulation.
+    """
+    road = ["-"] * (ROAD_LENGTH + 1) # Create the road
     
-    if driver_car['status'] == 'Waiting':
-        return "[Waiting to start...]"
-    if driver_car['status'] == 'Finished':
-        return "[Finished]"
+    # Place a fog marker to show what drivers can see
+    fog_marker_pos = int(CRASH_POINT - VISIBILITY_DISTANCE)
+    if 0 < fog_marker_pos < ROAD_LENGTH:
+        road[fog_marker_pos] = "|" # "|" = Fog visibility limit
     
-    # Place the driver's car
-    road[0] = "🚘"
-    if driver_car['status'] == 'Crashed': road[0] = "💥"
-    if driver_car['status'] == 'Stopped': road[0] = "🛑"
-    if driver_car['status'] == 'Braking (Alert)': road[0] = "B" # 'B' for ATOA Braking
+    # Place cars on the road, drawing C and D first
+    for car_id in ['C', 'D', 'B', 'A']:
+        car = cars[car_id]
+        pos = int(math.floor(car['x']))
 
-    occupied_positions = {}
-    for car in all_cars.values():
-        if car['id'] == driver_car['id'] or car['x'] < driver_car['x']:
-            continue # Skip self or cars behind
+        if 0 <= pos <= ROAD_LENGTH:
+            symbol = car_id # Default
+            if car['status'] == 'Crashed': symbol = "💥"
+            elif car['status'] == 'Stopped': symbol = "🛑"
+            elif car['status'] == 'Braking (Alert)': symbol = car_id.lower() # "c", "d"
             
-        distance = car['x'] - driver_car['x']
-            
-        if 0 < distance < view_length:
-            distance_int = int(distance)
-            symbol = "?"
-            
-            if distance <= VISIBILITY_DISTANCE:
-                if car['status'] == 'Crashed': symbol = "💥"
-                elif car['status'] == 'Stopped': symbol = "🛑"
-                elif car['status'] == 'Braking (Alert)': symbol = "B"
-                else: symbol = "🚘"
-            else:
-                symbol = "▒" # Fog
-            
-            if distance_int not in occupied_positions or occupied_positions[distance_int] == "▒":
-                occupied_positions[distance_int] = symbol
-
-    for pos, symbol in occupied_positions.items():
-        if 0 <= pos < len(road):
             road[pos] = symbol
             
     return "".join(road)
@@ -235,19 +216,23 @@ if reset_button:
 if st.session_state.simulation_running:
     
     # --- Placeholders for UI elements ---
-    st.markdown(f"**Fog Visibility:** `{VISIBILITY_DISTANCE:.1f} units` | **Simulation Time:** `{st.session_state.sim_time}`")
+    st.markdown(f"**Fog Visibility:** `{VISIBILITY_DISTANCE:.1f} units` (Indicated by `|`) | **Simulation Time:** `{st.session_state.sim_time}`")
     
-    colA, colB = st.columns(2)
+    # --- SINGLE ROAD DISPLAY ---
+    st.subheader("Full Road View")
+    road_placeholder = st.empty()
+    
+    # --- CAR STATUS ---
+    st.markdown("---")
+    colA, colB, colC, colD = st.columns(4)
     with colA:
-        st.subheader("Car A")
-        dashA_placeholder = st.empty()
-        st.subheader("Car B")
-        dashB_placeholder = st.empty()
+        carA_status = st.empty()
     with colB:
-        st.subheader("Car C")
-        dashC_placeholder = st.empty()
-        st.subheader("Car D")
-        dashD_placeholder = st.empty()
+        carB_status = st.empty()
+    with colC:
+        carC_status = st.empty()
+    with colD:
+        carD_status = st.empty()
         
     # This placeholder is the fix for the DeltaGenerator error
     voice_placeholder = st.empty()
@@ -265,17 +250,30 @@ if st.session_state.simulation_running:
     )
 
     # --- 3. Render the simulation ---
-    dashA_placeholder.code(f"View: {render_drivers_view(st.session_state.cars['A'], st.session_state.cars)}", language="text")
-    dashB_placeholder.code(f"View: {render_drivers_view(st.session_state.cars['B'], st.session_state.cars)}", language="text")
-    dashC_placeholder.code(f"View: {render_drivers_view(st.session_state.cars['C'], st.session_state.cars)}", language="text")
-    dashD_placeholder.code(f"View: {render_drivers_view(st.session_state.cars['D'], st.session_state.cars)}", language="text")
+    road_placeholder.code(render_full_road(st.session_state.cars), language="text")
 
-    # --- 4. Process Voice Alerts (Hidden) ---
+    # --- 4. Render Status Metrics ---
+    carA_status.metric("Car A", st.session_state.cars['A']['status'], f"{int(st.session_state.cars['A']['x'])}m")
+    carB_status.metric("Car B", st.session_state.cars['B']['status'], f"{int(st.session_state.cars['B']['x'])}m")
+    
+    # Highlight the "saved" cars
+    if st.session_state.cars['C']['status'] == 'Braking (Alert)':
+        carC_status.metric("Car C", st.session_state.cars['C']['status'], "ATOA ALERT!")
+    else:
+        carC_status.metric("Car C", st.session_state.cars['C']['status'], f"{int(st.session_state.cars['C']['x'])}m")
+    
+    if st.session_state.cars['D']['status'] == 'Braking (Alert)':
+        carD_status.metric("Car D", st.session_state.cars['D']['status'], "ATOA ALERT!")
+    else:
+        carD_status.metric("Car D", st.session_state.cars['D']['status'], f"{int(st.session_state.cars['D']['x'])}m")
+
+
+    # --- 5. Process Voice Alerts (Hidden) ---
     voice_html = speak_alerts(st.session_state.voice_queue)
     voice_placeholder.empty() 
     voice_placeholder.write(components.html(voice_html, height=0))
 
-    # --- 5. Increment time and rerun ---
+    # --- 6. Increment time and rerun ---
     st.session_state.sim_time += 1
 
     # Check for end condition
@@ -286,7 +284,7 @@ if st.session_state.simulation_running:
              st.success("Proof of Concept: Cars C and D received the ATOA alert and stopped safely!")
         st.balloons()
     else:
-        time.sleep(0.4) # Control the simulation speed
+        time.sleep(0.3) # Control the simulation speed
         st.rerun()
 
 else:
